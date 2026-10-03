@@ -32,17 +32,16 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
 /// State-mutating calls: writing a map or data-var.
 pub(crate) const STATE_WRITES: &[&str] = &["map-set", "map-insert", "map-delete", "var-set"];
 
-/// Asset-moving calls (native STX, fungible, non-fungible).
-pub(crate) const ASSET_MOVES: &[&str] = &[
-    "stx-transfer?",
-    "stx-transfer-memo?",
-    "ft-transfer?",
-    "ft-mint?",
-    "ft-burn?",
-    "nft-transfer?",
-    "nft-mint?",
-    "nft-burn?",
-];
+/// Privileged asset operations that need an explicit caller check.
+///
+/// NOTE: `stx-transfer?` / `ft-transfer?` / `nft-transfer?` are deliberately
+/// EXCLUDED: the Clarity runtime enforces that the `sender` argument equals
+/// `tx-sender`, so a bare transfer is self-authorizing and does not need an
+/// extra guard. Minting and burning carry no such built-in check, so those are
+/// the privileged operations we flag when unguarded. (A transfer wrapped in
+/// `as-contract` is a separate concern handled by its own rule.)
+pub(crate) const ASSET_MOVES: &[&str] =
+    &["ft-mint?", "ft-burn?", "nft-mint?", "nft-burn?", "stx-burn?"];
 
 /// Is this form a `(define-public (name (args...)) body...)`? Returns (name, line).
 pub(crate) fn as_define_public(form: &Form) -> Option<(String, usize)> {
