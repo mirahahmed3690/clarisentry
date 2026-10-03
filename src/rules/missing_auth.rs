@@ -8,8 +8,50 @@
 
 use super::{as_define_public, Context, Rule, ASSET_MOVES, STATE_WRITES};
 use crate::finding::{Finding, Severity};
+use crate::sexpr::Form;
 
 pub struct MissingAuth;
+
+/// Well-written Clarity contracts often centralize authorization in a helper
+/// (`(try! (check-dao-auth))`, `(asserts! (is-authorized) ...)`, etc.) rather
+/// than inlining `tx-sender`. Treat a call to such a helper as an auth check so
+/// we don't flood real contracts with false positives. Heuristic on the callee
+/// name — tuned for high precision (prefer a false negative over a false alarm).
+fn is_auth_guard_call(head: &str) -> bool {
+    let h = head.to_lowercase();
+    // Substrings that strongly imply an auth check (not a setter). Note: bare
+    // "owner"/"admin" is deliberately excluded — it matches setters like
+    // `set-owner`. Those are caught only via the auth-check PREFIXes below.
+    const SUBSTR: &[&str] = &[
+        "auth", "approved", "permission", "allowed", "-dao", "whitelist", "guard",
+    ];
+    const PREFIX: &[&str] = &[
+        "check-", "assert-", "only-", "verify-", "require-", "is-dao", "is-owner", "is-admin",
+        "is-approved", "can-",
+    ];
+    SUBSTR.iter().any(|s| h.contains(s)) || PREFIX.iter().any(|p| h.starts_with(p))
+}
+
+/// Does the function BODY invoke a call that looks like an auth guard? The
+/// function's own signature (its name + args) is excluded so a setter named
+/// `set-owner` isn't mistaken for an auth helper.
+fn calls_auth_guard(form: &Form) -> bool {
+    let Some(items) = form.items() else {
+        return false;
+    };
+    let mut found = false;
+    // items[0] = `define-public`, items[1] = signature; body starts at [2].
+    for body in items.iter().skip(2) {
+        body.walk(&mut |f| {
+            if let Some(h) = f.head() {
+                if is_auth_guard_call(h) {
+                    found = true;
+                }
+            }
+        });
+    }
+    found
+}
 
 impl Rule for MissingAuth {
     fn id(&self) -> &'static str {
@@ -36,6 +78,9 @@ impl Rule for MissingAuth {
             let has_caller = form.contains_atom("contract-caller");
             if has_sender || has_caller {
                 continue; // some caller-based check is present
+            }
+            if calls_auth_guard(form) {
+                continue; // authorization delegated to an auth-helper function
             }
 
             let what = if moves {

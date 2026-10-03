@@ -141,14 +141,18 @@ impl<'a> Lexer<'a> {
                     }
                     out.push(Tok::Atom(s, l));
                 }
-                c if c.is_whitespace() => {
+                // Commas separate Clarity tuple fields; treat them as whitespace
+                // so `caller: tx-sender,` yields the atom `tx-sender`, not `tx-sender,`.
+                c if c.is_whitespace() || c == ',' => {
                     self.bump();
                 }
                 _ => {
                     let l = self.line;
                     let mut s = String::new();
                     while let Some(&c) = self.chars.peek() {
-                        if c.is_whitespace() || matches!(c, '(' | ')' | '{' | '}' | ';' | '"') {
+                        if c.is_whitespace()
+                            || matches!(c, '(' | ')' | '{' | '}' | ';' | '"' | ',')
+                        {
                             break;
                         }
                         s.push(c);
